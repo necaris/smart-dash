@@ -27,16 +27,18 @@
 ;;; Code:
 
 (defgroup smart-dash nil
-  "Intelligently insert either a dash or an underscore depending
-on context."
+  "Insert either a dash or an underscore depending on context."
   :group 'convenience
   :prefix "smart-dash")
 
 (defcustom smart-dash-c-modes '(c-mode c++-mode objc-mode)
-  ; Remove definition with (makunbound 'smart-dash-c-modes)
-  "Major modes in which _> should be replaced by the -> struct
-pointer member access operator and __ should be replaced by the
--- post-decrement operator."
+  ;; Remove definition with (makunbound 'smart-dash-c-modes)
+  "Major modes in which `_>' should be replaced by the `->' struct
+pointer member access operator and `__' should be replaced by the
+`--' post-decrement operator."
+  :group 'smart-dash
+  :type '(repeat symbol))
+
   :group 'smart-dash
   :type '(repeat symbol))
 
@@ -49,10 +51,10 @@ pointer member access operator and __ should be replaced by the
 ;; <kp-subtract> on the numeric keypad can also be used to always
 ;; insert a dash.
 (easy-mmode-defmap smart-dash-mode-keymap
-   ; Remove definition with (makunbound 'smart-dash-mode-keymap)
-   `(("-" . smart-dash-insert)
-     (,(kbd "<kp-subtract>") . smart-dash-insert-dash))
-   "Key map for `smart-dash-mode'.")
+  ;; Remove definition with (makunbound 'smart-dash-mode-keymap)
+  `(("-" . smart-dash-insert)
+    (,(kbd "<kp-subtract>") . smart-dash-insert-dash))
+  "Key map for `smart-dash-mode'.")
 
 ;;;###autoload
 (define-minor-mode smart-dash-mode
@@ -76,20 +78,25 @@ postfix-decrement aren't made more difficult by Smart-Dash mode's
 tendency to insert underscores at the tail ends of identifiers
 whether you want it to or not.  Note that this will necessitate
 that you type literal underscores if you want more than one
-underscore in a row."
+underscore in a row.
+
+If Smart-Dash mode is activated while in a Python-like mode, it will activate
+Smart-Dash-Dunder-Mode, which turns two preceding dashes (e.g. `--IDENT') into
+preceding underscores (`__IDENT').
+"
   nil "" smart-dash-mode-keymap
   (if smart-dash-mode
-      (progn
-        (and (memq major-mode smart-dash-c-modes)
-             (smart-dash-c-mode 1))
-        (smart-dash-isearch-install))
-    (smart-dash-isearch-uninstall)
-    (smart-dash-c-mode 0)))
+      (cond (((and (memq major-mode smart-dash-c-modes (smart-dash-c-mode 1))) (smart-dash-isearch-install))
+             ((and (memq major-mode smart-dash-dunder-modes (smart-dash-dunder-mode 1))) (smart-dash-isearch-install))))
+    (progn
+      (smart-dash-isearch-uninstall)
+      (smart-dash-c-mode 0)
+      (smart-dash-dunder-mode 0))))
 
 (easy-mmode-defmap smart-dash-c-mode-keymap
-   ; Remove definition with (makunbound 'smart-dash-c-mode-keymap)
-   '((">" . smart-dash-insert-gt))
-   "Key map supplement for `smart-dash-mode' when in a C-like
+  ;; Remove definition with (makunbound 'smart-dash-c-mode-keymap)
+  '((">" . smart-dash-insert-gt))
+  "Key map supplement for `smart-dash-mode' when in a C-like
 major mode.  See `smart-dash-c-modes'")
 
 (define-minor-mode smart-dash-c-mode
@@ -125,7 +132,7 @@ activate it if the current major mode is listed in
   (char-before (+ (point) n)))
 
 (defun smart-dash-insert-or-overwrite (text)
-  "Insert or overwrite TEXT depending of overwrite-mode status.
+  "Insert or overwrite TEXT depending on overwrite-mode status.
 TEST can be a single character or a string.
 Multi-byte characters are handled properly."
   (when overwrite-mode
@@ -135,29 +142,42 @@ Multi-byte characters are handled properly."
   (insert text))
 
 ;; This function makes all of the decisions about whether to insert a
-;; dash or an underscore, and how to change the preceeding text if
+;; dash or an underscore, and how to change the preceding text if
 ;; necessary.  It takes all buffer-inspection and buffer-modification
 ;; functions as arguments so that it can be used both to edit the
-;; actual buffer and to edit the isearch-string.
+;; actual buffer and to edit the `isearch-string'.
 (defun smart-dash-do-insert (insertf deletef bobpf char-before-f regcodepf)
   (let ((ident-re "[A-Za-z0-9_]")
         (dash-or-underscore "-"))
     (when (and (funcall regcodepf)
                (not (funcall bobpf)))
-      (do-c-fixup insertf deletef char-before-f)
+      (do-c-dunder-fixup insertf deletef char-before-f)
       (when (string-match ident-re (string (funcall char-before-f)))
         (setf dash-or-underscore "_")))
     (funcall insertf dash-or-underscore)))
 
-(defun do-c-fixup (insertf deletef char-before-f)
-  (when smart-dash-c-mode
-    (cond ((eql ?_ (funcall char-before-f))
-           (funcall deletef 1)
-           (funcall insertf "-"))
-          ((and (eql ?- (funcall char-before-f))
-                (eql ?- (funcall char-before-f -1)))
-           (funcall deletef 2)
-           (funcall insertf "_-")))))
+(defun -do-dunder-fixup (insertf deletef char-before-f)
+  (let ((alnum-re "[A-Za-z0-9]"))
+    (when (and (string-match alnum-re (funcall char-before-f))
+               (eql ?- (funcall char-before-f -1))
+               (eql ?- (funcall char-before-f -2)))
+      (funcall deletef 2)
+      (funcall insertf "_-"))))
+
+(defun -do-c-fixup (insertf deletef char-before-f)
+  (cond ((eql ?_ (funcall char-before-f))
+         (funcall deletef 1)
+         (funcall insertf "-"))
+        ((and (eql ?- (funcall char-before-f))
+              (eql ?- (funcall char-before-f -1)))
+         (funcall deletef 2)
+         (funcall insertf "_-"))))
+
+
+(defun do-c-dunder-fixup (insertf deletef char-before-f)
+  (cond (smart-dash-c-mode (-do-c-fixup insertf deletef char-before-f))
+        (smart-dash-dunder-mode (-do-dunder-fixup insertf deletef char-before-f))
+        (t nil)))
 
 (defun smart-dash-insert ()
   "Insert an underscore following [A-Za-z0-9_], a dash otherwise.
@@ -171,7 +191,7 @@ If `smart-dash-c-mode' is activated, also replace __ with --."
                         'smart-dash-in-regular-code-p))
 
 (defun smart-dash-insert-dash ()
-  "Insert a dash regardless of the preceeding character."
+  "Insert a dash regardless of the preceding character."
   (interactive)
   (smart-dash-insert-or-overwrite ?-))
 
@@ -182,10 +202,10 @@ If `smart-dash-c-mode' is activated, also replace __ with --."
   (funcall insertf ">"))
 
 (defun smart-dash-insert-gt ()
-  "Insert a greater-than symbol.  If the preceeding character is
-an underscore, replace it with a dash.
+  "Insert a greater-than symbol. If the preceding character is an
+underscore,replace it with a dash.
 
-This behavior is desirable in order to make struct pointer member
+This behavior is desirable in order to make C-style structure pointer member
 access comfortable."
   (interactive)
   (smart-dash-do-insert-gt 'smart-dash-insert-or-overwrite
@@ -229,10 +249,10 @@ access comfortable."
   (= 0 (length isearch-string)))
 
 (defun smart-dash-isearch-insert ()
-  "Isearch for an underscore following [A-Za-z0-9_], a dash otherwise.
+  "`isearch' for an underscore following [A-Za-z0-9_], a dash otherwise.
 
 If `smart-dash-c-mode' is activated, also replace __ with -- in
-isearches."
+`isearch'es."
   (interactive)
   (smart-dash-do-insert 'smart-dash-isearch-string
                         'smart-dash-isearch-del-char
@@ -241,7 +261,7 @@ isearches."
                         'smart-dash-isearch-in-regular-code-p))
 
 (defun smart-dash-isearch-insert-dash ()
-  "Isearch for a dash regardless of the preceeding character."
+  "`isearch' for a dash regardless of the preceding character."
   (interactive)
   (smart-dash-isearch-string ?-))
 
@@ -251,9 +271,9 @@ isearches."
     (setq isearch-mode-map (copy-keymap map)))
   (define-key isearch-mode-map "-" 'smart-dash-isearch-insert)
   (define-key
-    isearch-mode-map
-    (kbd "<kp-subtract>")
-    'smart-dash-isearch-insert-dash))
+   isearch-mode-map
+   (kbd "<kp-subtract>")
+   'smart-dash-isearch-insert-dash))
 
 ;; The surest, cleanest way to undo the work of
 ;; `smart-dash-isearch-install' would be to delete the buffer-local
@@ -265,13 +285,14 @@ isearches."
   (when (local-variable-p 'isearch-mode-map)
     (define-key isearch-mode-map "-" 'isearch-printing-char)
     (define-key isearch-mode-map
-      (kbd "<kp-subtract>") 'isearch-printing-char)))
+                (kbd "<kp-subtract>") 'isearch-printing-char)))
 
 (defun smart-dash-isearch-insert-gt ()
-  "Isearch for a greater-than symbol.  If the preceeding
-character is an underscore, replace it with a dash.
+  "`isearch' for a greater-than symbol.
 
-This behavior is desirable in order to make searching for struct
+If the preceding character is an underscore, replace it with a dash.
+
+This behavior is desirable in order to make C-style structure
 pointer member access comfortable."
   (interactive)
   (smart-dash-do-insert-gt 'smart-dash-isearch-string
@@ -286,7 +307,7 @@ pointer member access comfortable."
     (setq isearch-mode-map (copy-keymap map)))
   (define-key isearch-mode-map ">" 'smart-dash-isearch-insert-gt))
 
-;; See comments on smart-dash-isearch-uninstall
+;; See comments on `smart-dash-isearch-uninstall'
 (defun smart-dash-c-isearch-uninstall ()
   (when (local-variable-p 'isearch-mode-map)
     (define-key isearch-mode-map ">" 'isearch-printing-char)))
@@ -320,7 +341,7 @@ for commands that are executed in Smart-Dash mode buffers."
   :group 'smart-dash)
 
 (defcustom smart-dash-minibuffer-enabled t
-  ; Remove definition with (makunbound 'smart-dash-minibuffer-enabled)
+  ;; Remove definition with (makunbound 'smart-dash-minibuffer-enabled)
   "If non-nil, activate Smart-Dash mode in the minibuffer for
 some commands.
 
@@ -332,7 +353,7 @@ activated in is controlled by `smart-dash-minibuffer-by-default',
   :type 'boolean)
 
 (defcustom smart-dash-minibuffer-by-default nil
-  ; Remove definition with (makunbound 'smart-dash-minibuffer-by-default)
+  ;; Remove definition with (makunbound 'smart-dash-minibuffer-by-default)
   "If non-nil, activate Smart-Dash mode in the minibuffer for all
 commands except those listed in `smart-dash-minibuffer-deny-commands'.
 
@@ -352,8 +373,7 @@ only for commands listed in `smart-dash-minibuffer-allow-commands'."
     string-rectangle
     find-tag
     grep)
-  ; Remove definition with
-  ; (makunbound 'smart-dash-minibuffer-allow-commands)
+  ;; Remove definition with (makunbound 'smart-dash-minibuffer-allow-commands)
   "Commands whose minibuffer inputs should have Smart-Dash mode
 activated when `smart-dash-minibuffer-by-default' is nil."
   :group 'smart-dash-minibuffer
@@ -363,8 +383,7 @@ activated when `smart-dash-minibuffer-by-default' is nil."
   '(execute-extended-command
     eval-expression
     find-file)
-  ; Remove definition with
-  ; (makunbound 'smart-dash-minibuffer-deny-commands)
+  ;; Remove definition with (makunbound 'smart-dash-minibuffer-deny-commands)
   "Commands whose minibuffer inputs should NOT have Smart-Dash
 mode activated when `smart-dash-minibuffer-by-default' is
 non-nil."
@@ -385,7 +404,7 @@ non-nil."
 ;; support should be enabled.
 
 ;; The possibility of recursive minibuffers necessitate using stacks
-;; rather than simple variables to deduce the current minibffer-using
+;; rather than simple variables to deduce the current minibuffer-using
 ;; command.
 (defvar smart-dash-minibuffer-last-exit-command-stack (list nil))
 (defvar smart-dash-minibuffer-this-command-stack (list nil))
