@@ -39,6 +39,9 @@ pointer member access operator and `__' should be replaced by the
   :group 'smart-dash
   :type '(repeat symbol))
 
+(defcustom smart-dash-dunder-modes '(python-mode)
+  ;; Remove definition with (makunbound 'smart-dash-dunder-modes)
+  "Major modes in which `--IDENTIFIER' should be replaced by `__IDENTIFIER'."
   :group 'smart-dash
   :type '(repeat symbol))
 
@@ -112,6 +115,27 @@ activate it if the current major mode is listed in
   (if smart-dash-c-mode
       (smart-dash-c-isearch-install)
     (smart-dash-c-isearch-uninstall)))
+
+(easy-mmode-defmap smart-dash-dunder-mode-keymap
+  ;; Remove definition with (makunbound 'smart-dash-dunder-mode-keymap)
+  ;; '((">" . smart-dash-insert-gt))
+  "Key map supplement for `smart-dash-mode' when in a Python-like
+major mode.  See `smart-dash-dunder-modes'")
+
+(define-minor-mode smart-dash-dunder-mode
+  "Modifies the behavior of the dash key.
+
+A prefix `--' operator becomes a `__', as is more common in Python and similar
+languages.
+
+DO NOT ACTIVATE THIS MINOR MODE DIRECTLY.  Smart-Dash mode will
+activate it if the current major mode is listed in
+`smart-dash-dunder-modes'."
+  nil "" smart-dash-dunder-mode-keymap
+  (if smart-dash-dunder-mode
+      (smart-dash-isearch-install)
+    (smart-dash-isearch-uninstall)))
+
 
 ;; in-include code thanks to Josh Huber
 (defun smart-dash-in-regular-code-p ()
